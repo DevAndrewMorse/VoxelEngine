@@ -4,41 +4,53 @@
 
 // -------------------- Window --------------------
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    if (uMsg == WM_DESTROY) {
-        PostQuitMessage(0);
-        return 0;
+    static HBITMAP hBackground = NULL; // offscreen static background
+
+    switch (uMsg) {
+        case WM_CREATE: {
+            // Create a static dark background bitmap
+            HDC hdc = GetDC(hwnd);
+            HDC memDC = CreateCompatibleDC(hdc);
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+
+            hBackground = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+            HGDIOBJ oldBmp = SelectObject(memDC, hBackground);
+
+            HBRUSH brush = CreateSolidBrush(RGB(20, 20, 20)); // dark gray
+            FillRect(memDC, &rect, brush);
+            DeleteObject(brush);
+
+            SelectObject(memDC, oldBmp);
+            DeleteDC(memDC);
+            ReleaseDC(hwnd, hdc);
+        } return 0;
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+
+            // Blit the static background
+            if (hBackground) {
+                HDC memDC = CreateCompatibleDC(hdc);
+                HGDIOBJ oldBmp = SelectObject(memDC, hBackground);
+
+                BitBlt(hdc, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom, memDC, 0, 0, SRCCOPY);
+
+                SelectObject(memDC, oldBmp);
+                DeleteDC(memDC);
+            }
+
+            EndPaint(hwnd, &ps);
+        } return 0;
+
+        case WM_DESTROY:
+            if (hBackground) DeleteObject(hBackground);
+            PostQuitMessage(0);
+            return 0;
     }
+
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
-}
-
-HWND CreateMainWindow(HINSTANCE hInstance, int width, int height, const char* title) {
-    WNDCLASS wc = {0};
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = "SimpleWindow";
-
-    RegisterClass(&wc);
-
-    HWND hwnd = CreateWindowEx(
-        0,
-        wc.lpszClassName,
-        title,
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, width, height,
-        NULL, NULL, hInstance, NULL
-    );
-
-    ShowWindow(hwnd, SW_SHOW);
-    return hwnd;
-}
-
-// -------------------- Rendering --------------------
-void ClearScreen(HDC hdc, HWND hwnd) {
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    HBRUSH brush = CreateSolidBrush(RGB(20, 20, 20));
-    FillRect(hdc, &rect, brush);
-    DeleteObject(brush);
 }
 
 // -------------------- FPS --------------------
@@ -68,46 +80,52 @@ void UpdateFPS(FPSCounter* counter, HWND hwnd) {
         counter->prevTime = currTime;
 
         char title[128];
-        sprintf(title, "Voxel Engine - Dark Frame [FPS: %.2f]", counter->fps);
+        sprintf(title, "Voxel Engine [FPS: %.2f]", counter->fps);
         SetWindowText(hwnd, title);
     }
 }
 
 // -------------------- Main Loop --------------------
 void GameLoop(HWND hwnd) {
-    HDC hdc = GetDC(hwnd);
     FPSCounter fps;
     InitFPS(&fps);
 
-    const double targetFrameTime = 1.0 / 60.0; // 60 FPS target
-
     MSG msg = {0};
     while (1) {
-        LARGE_INTEGER frameStart;
-        QueryPerformanceCounter(&frameStart);
-
         // Handle window messages
-        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) break;
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) return;
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
 
-        // Update & render
-        ClearScreen(hdc, hwnd);
+        // Update FPS only; background is static
         UpdateFPS(&fps, hwnd);
 
-        // Wait until next frame to cap FPS
-        LARGE_INTEGER frameEnd;
-        QueryPerformanceCounter(&frameEnd);
-        double frameTime = (double)(frameEnd.QuadPart - frameStart.QuadPart) / fps.freq.QuadPart;
-        double sleepTime = targetFrameTime - frameTime;
-        if (sleepTime > 0) {
-            Sleep((DWORD)(sleepTime * 1000)); // convert seconds to ms
-        }
+        Sleep(1); // small sleep to yield CPU
     }
+}
 
-    ReleaseDC(hwnd, hdc);
+// -------------------- Window Creation --------------------
+HWND CreateMainWindow(HINSTANCE hInstance, int width, int height, const char* title) {
+    WNDCLASS wc = {0};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = "SimpleWindow";
+
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0,
+        wc.lpszClassName,
+        title,
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, width, height,
+        NULL, NULL, hInstance, NULL
+    );
+
+    ShowWindow(hwnd, SW_SHOW);
+    return hwnd;
 }
 
 // -------------------- Entry Point --------------------
